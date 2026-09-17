@@ -422,6 +422,33 @@ describe('table', function()
         })
     end)
 
+    it('wrapped long link destinations keep right border', function()
+        with_columns(80, function()
+            util.setup.text({
+                '',
+                '| Cena / szt. brutto | Paczka | Oferta |',
+                '|---|---|---|',
+                '| **6,99 zł** | 1 szt. | [Allegro Neopak BC650 650 g — szymonnn1](https://allegro.pl/produkt/karton-klapowy-60-cm-x-40-cm-x-40-cm-650-g-m2-1-szt-da9b991a-7ba1-4251-9677-06262dd530e9?offerId=7509858800) |',
+                '| 7,99 zł | 1 szt. (7,75 zł od 19 szt.) | [Neopak BC650 — sklep](https://neopak.pl/karton-klapowy-600x400x400mm-bc650-id-2906) |',
+            }, {
+                debounce = 0,
+                pipe_table = { max_table_width = 1.0 },
+                win_options = { wrap = { default = false, rendered = true } },
+            })
+
+            util.assert_screen({
+                '┌────────────────────┬────────────────────────────┬────────────────────────────┐',
+                '│ Cena / szt. brutto │ Paczka                     │ Oferta                     │',
+                '├────────────────────┼────────────────────────────┼────────────────────────────┤',
+                '│ 6,99 zł            │ 1 szt.                     │ 󰖟 Allegro Neopak BC650     │',
+                '│                    │                            │ 650 g — szymonnn1          │',
+                '│ 7,99 zł            │ 1 szt. (7,75 zł od 19      │ 󰖟 Neopak BC650 — sklep     │',
+                '│                    │ szt.)                      │                            │',
+                '└────────────────────┴────────────────────────────┴────────────────────────────┘',
+            })
+        end)
+    end)
+
     it('wrapped long delimiter', function()
         util.setup.text({
             '',

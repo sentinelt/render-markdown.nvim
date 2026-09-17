@@ -1,5 +1,6 @@
 local Base = require('render-markdown.render.base')
 local Line = require('render-markdown.lib.line')
+local compat = require('render-markdown.lib.compat')
 local env = require('render-markdown.lib.env')
 local iter = require('render-markdown.lib.iter')
 local log = require('render-markdown.core.log')
@@ -256,6 +257,20 @@ function Render:compute_wrap_layout()
             needs_wrap = needs_wrap or lines > 1
         end
         row_heights[r] = max_lines
+    end
+
+    -- Concealed destinations (markdown links) still occupy wrap slots
+    -- (neovim #14409). Treat a raw source line wider than the window as
+    -- needing the wrap path so the last pipe is not left on a continuation.
+    if not needs_wrap then
+        local function source_wraps(node)
+            local _, source = node:line('first', 0)
+            return source and str.width(source) > win_width
+        end
+        needs_wrap = source_wraps(self.data.delim)
+        for _, row in ipairs(self.data.rows) do
+            needs_wrap = needs_wrap or source_wraps(row.node)
+        end
     end
 
     if not needs_wrap then
@@ -859,8 +874,68 @@ function Render:wrapped()
     end
 
     local win_width = env.win.width(self.context.win)
+    local pending = {} ---@type render.md.Line[]
+    local anchor ---@type render.md.Node?
+
+    ---@param node render.md.Node
+    ---@param lines render.md.Line[]
+    ---@param above boolean
+    local function flush_pending(node, lines, above)
+        if #lines == 0 then
+            return
+        end
+        local virt_lines = {} ---@type render.md.mark.Line[]
+        for _, line in ipairs(lines) do
+            virt_lines[#virt_lines + 1] =
+                self:indent():line(true):extend(line):get()
+        end
+        self.marks:add(
+            self.config,
+            'virtual_lines',
+            node.start_row,
+            node.end_col,
+            {
+                virt_lines = virt_lines,
+                virt_lines_above = above,
+            }
+        )
+    end
+
     for _, group in ipairs(groups) do
-        self:place_wrapped_group(group.node, group.lines, win_width)
+        local _, buf_line = group.node:line('first', 0)
+        buf_line = buf_line or ''
+        -- conceal_lines hides virt_lines on the same row, so long source
+        -- lines (typically a concealed URL) are collapsed and their visual
+        -- lines are attached to the previous visible row.
+        local raw_wraps = compat.has_11 and str.width(buf_line) > win_width
+        -- First visible group stays overlaid so later conceal_lines rows
+        -- have somewhere to attach; virt_lines on a concealed row are hidden.
+        if raw_wraps and anchor then
+            self.marks:add(
+                self.config,
+                'virtual_lines',
+                group.node.start_row,
+                0,
+                {
+                    conceal_lines = '',
+                }
+            )
+            vim.list_extend(pending, group.lines)
+        else
+            if #pending > 0 then
+                flush_pending(group.node, pending, true)
+                pending = {}
+            end
+            self:place_wrapped_group(group.node, group.lines, win_width)
+            anchor = group.node
+        end
+    end
+    if #pending > 0 then
+        if anchor then
+            flush_pending(anchor, pending, false)
+        else
+            flush_pending(groups[1].node, pending, true)
+        end
     end
 end
 
@@ -882,16 +957,16 @@ end
 function Render:place_wrapped_group(node, lines, win_width)
     local _, buf_line = node:line('first', 0)
     buf_line = buf_line or ''
+    if #lines == 0 then
+        return
+    end
+
     if #buf_line > 0 then
         self.marks:add(self.config, 'table_border', node.start_row, 0, {
             end_row = node.start_row,
             end_col = #buf_line,
             conceal = '',
         })
-    end
-
-    if #lines == 0 then
-        return
     end
 
     local slots = self:wrapped_slots(buf_line, win_width)
