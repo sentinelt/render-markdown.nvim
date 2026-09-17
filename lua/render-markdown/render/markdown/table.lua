@@ -1,6 +1,5 @@
 local Base = require('render-markdown.render.base')
 local Line = require('render-markdown.lib.line')
-local compat = require('render-markdown.lib.compat')
 local env = require('render-markdown.lib.env')
 local iter = require('render-markdown.lib.iter')
 local log = require('render-markdown.core.log')
@@ -155,12 +154,6 @@ function Render:compute_wrap_layout()
     if self.config.max_table_width == 0 then
         return no_wrap
     end
-    -- Feature disabled when the window has line-wrap turned off — the table will
-    -- scroll horizontally so there are no continuation screen lines to fill, and
-    -- the col-redistribution logic would make things narrower for no reason.
-    if not env.win.get(self.context.win, 'wrap') then
-        return no_wrap
-    end
     -- Only supported for padded/trimmed cell modes
     if not vim.tbl_contains({ 'padded', 'trimmed' }, self.config.cell) then
         return no_wrap
@@ -259,20 +252,6 @@ function Render:compute_wrap_layout()
         row_heights[r] = max_lines
     end
 
-    -- Concealed destinations (markdown links) still occupy wrap slots
-    -- (neovim #14409). Treat a raw source line wider than the window as
-    -- needing the wrap path so the last pipe is not left on a continuation.
-    if not needs_wrap then
-        local function source_wraps(node)
-            local _, source = node:line('first', 0)
-            return source and str.width(source) > win_width
-        end
-        needs_wrap = source_wraps(self.data.delim)
-        for _, row in ipairs(self.data.rows) do
-            needs_wrap = needs_wrap or source_wraps(row.node)
-        end
-    end
-
     if not needs_wrap then
         return no_wrap
     end
@@ -285,6 +264,16 @@ end
 function Render:indent_width()
     local first = self.data.rows[1].node
     return math.max(str.spaces('start', first.text), first.start_col)
+end
+
+---@private
+---@return integer
+function Render:right_border_col()
+    local width = self:indent_width() + 1
+    for _, col in ipairs(self.data.cols) do
+        width = width + col.width + 1
+    end
+    return width - 1
 end
 
 ---@private
@@ -577,11 +566,35 @@ function Render:row(row)
     local highlight = header and self.config.head or self.config.row
 
     if vim.tbl_contains({ 'trimmed', 'padded', 'raw' }, self.config.cell) then
-        for _, pipe in ipairs(row.pipes) do
-            self.marks:over(self.config, 'table_border', pipe, {
-                virt_text = { { icon, highlight } },
-                virt_text_pos = 'overlay',
-            })
+        for i, pipe in ipairs(row.pipes) do
+            -- A long concealed URL still wraps the raw line (neovim #14409),
+            -- so the last "|" can sit on a continuation. Hide it and paint
+            -- the border on the first screen line at the table's width.
+            if
+                i == #row.pipes
+                and env.win.get(self.context.win, 'wrap')
+            then
+                self.marks:over(self.config, 'table_border', pipe, {
+                    conceal = '',
+                })
+                self.marks:add(
+                    self.config,
+                    'table_border',
+                    row.node.start_row,
+                    0,
+                    {
+                        virt_text = { { icon, highlight } },
+                        virt_text_pos = 'overlay',
+                        virt_text_win_col = self:right_border_col(),
+                        hl_mode = 'combine',
+                    }
+                )
+            else
+                self.marks:over(self.config, 'table_border', pipe, {
+                    virt_text = { { icon, highlight } },
+                    virt_text_pos = 'overlay',
+                })
+            end
         end
     end
 
@@ -752,74 +765,6 @@ function Render:row_wrapped_lines(row, row_index)
 end
 
 ---@private
----@param text string
----@param win_width integer
----@return integer[]
-function Render:wrapped_slots(text, win_width)
-    if #text == 0 then
-        return { 0 }
-    end
-
-    local linebreak = env.win.get(self.context.win, 'linebreak') == true
-    local breakat = vim.api.nvim_get_option_value('breakat', {})
-    local showbreak = env.win.get(self.context.win, 'showbreak')
-    local breakindent = env.win.get(self.context.win, 'breakindent') == true
-    local indent = breakindent and str.spaces('start', text) or 0
-    local continuation_width =
-        math.max(win_width - str.width(tostring(showbreak)) - indent, 1)
-
-    local chars = {} ---@type { col: integer, text: string, width: integer }[]
-    local bytes = vim.str_utf_pos(text)
-    for index, start_byte in ipairs(bytes) do
-        local end_byte = index < #bytes and bytes[index + 1] - 1 or #text
-        local char = text:sub(start_byte, end_byte)
-        chars[#chars + 1] = {
-            col = start_byte - 1,
-            text = char,
-            width = str.width(char),
-        }
-    end
-
-    local slots = {} ---@type integer[]
-    local index = 1
-    local first = true
-    while index <= #chars do
-        slots[#slots + 1] = chars[index].col
-        local width = first and win_width or continuation_width
-        local used = 0
-        local next_index = index
-        local break_index = nil ---@type integer?
-        while next_index <= #chars do
-            local char = chars[next_index]
-            if used > 0 and used + char.width > width then
-                break
-            end
-            used = used + char.width
-            if linebreak and breakat:find(char.text, 1, true) then
-                break_index = next_index
-            end
-            next_index = next_index + 1
-            if used >= width then
-                break
-            end
-        end
-        if next_index > #chars then
-            break
-        elseif linebreak and break_index and break_index >= index then
-            index = break_index + 1
-            while index <= #chars and chars[index].text:match('^%s$') do
-                index = index + 1
-            end
-        else
-            index = next_index
-        end
-        first = false
-    end
-
-    return slots
-end
-
----@private
 function Render:wrapped()
     -- Top border (above first row)
     if self.config.border_enabled then
@@ -874,68 +819,8 @@ function Render:wrapped()
     end
 
     local win_width = env.win.width(self.context.win)
-    local pending = {} ---@type render.md.Line[]
-    local anchor ---@type render.md.Node?
-
-    ---@param node render.md.Node
-    ---@param lines render.md.Line[]
-    ---@param above boolean
-    local function flush_pending(node, lines, above)
-        if #lines == 0 then
-            return
-        end
-        local virt_lines = {} ---@type render.md.mark.Line[]
-        for _, line in ipairs(lines) do
-            virt_lines[#virt_lines + 1] =
-                self:indent():line(true):extend(line):get()
-        end
-        self.marks:add(
-            self.config,
-            'virtual_lines',
-            node.start_row,
-            node.end_col,
-            {
-                virt_lines = virt_lines,
-                virt_lines_above = above,
-            }
-        )
-    end
-
     for _, group in ipairs(groups) do
-        local _, buf_line = group.node:line('first', 0)
-        buf_line = buf_line or ''
-        -- conceal_lines hides virt_lines on the same row, so long source
-        -- lines (typically a concealed URL) are collapsed and their visual
-        -- lines are attached to the previous visible row.
-        local raw_wraps = compat.has_11 and str.width(buf_line) > win_width
-        -- First visible group stays overlaid so later conceal_lines rows
-        -- have somewhere to attach; virt_lines on a concealed row are hidden.
-        if raw_wraps and anchor then
-            self.marks:add(
-                self.config,
-                'virtual_lines',
-                group.node.start_row,
-                0,
-                {
-                    conceal_lines = '',
-                }
-            )
-            vim.list_extend(pending, group.lines)
-        else
-            if #pending > 0 then
-                flush_pending(group.node, pending, true)
-                pending = {}
-            end
-            self:place_wrapped_group(group.node, group.lines, win_width)
-            anchor = group.node
-        end
-    end
-    if #pending > 0 then
-        if anchor then
-            flush_pending(anchor, pending, false)
-        else
-            flush_pending(groups[1].node, pending, true)
-        end
+        self:place_wrapped_group(group.node, group.lines, win_width)
     end
 end
 
@@ -969,21 +854,19 @@ function Render:place_wrapped_group(node, lines, win_width)
         })
     end
 
-    local slots = self:wrapped_slots(buf_line, win_width)
+    -- Only the first wrap slot is safe for a full-width table row. Later
+    -- slots exist because concealed URLs still wrap (neovim #14409) and
+    -- painting onto them puts the right border on a continuation line.
+    self.marks:add(self.config, 'table_border', node.start_row, 0, {
+        virt_text = lines[1]:get(),
+        virt_text_pos = 'overlay',
+        virt_text_win_col = 0,
+        hl_mode = 'combine',
+    })
     local virt_lines = {} ---@type render.md.mark.Line[]
-    for i, line in ipairs(lines) do
-        local col = slots[i]
-        if col then
-            self.marks:add(self.config, 'table_border', node.start_row, col, {
-                virt_text = line:get(),
-                virt_text_pos = 'overlay',
-                virt_text_win_col = 0,
-                hl_mode = 'combine',
-            })
-        else
-            virt_lines[#virt_lines + 1] =
-                self:indent():line(true):extend(line):get()
-        end
+    for i = 2, #lines do
+        virt_lines[#virt_lines + 1] =
+            self:indent():line(true):extend(lines[i]):get()
     end
     if #virt_lines > 0 then
         self.marks:add(

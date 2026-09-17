@@ -433,7 +433,7 @@ describe('table', function()
             }, {
                 debounce = 0,
                 pipe_table = { max_table_width = 1.0 },
-                win_options = { wrap = { default = false, rendered = true } },
+                win_options = { wrap = { default = false, rendered = false } },
             })
 
             util.assert_screen({
@@ -445,6 +445,31 @@ describe('table', function()
                 '│ 7,99 zł            │ 1 szt. (7,75 zł od 19      │ 󰖟 Neopak BC650 — sklep     │',
                 '│                    │ szt.)                      │                            │',
                 '└────────────────────┴────────────────────────────┴────────────────────────────┘',
+            })
+        end)
+    end)
+
+    it('fits table with long link urls keeps buffer rows', function()
+        with_columns(80, function()
+            util.setup.text({
+                '',
+                '| Cena / szt. brutto | Paczka | Oferta |',
+                '|---|---|---|',
+                '| **5,50 zł** | 20 szt. / 110 zł | [Allegro Catido 600 g](https://allegro.pl/produkt/karton-klapowy-600x400x200mm-5w-b-600g-m2-szt-20-78a58ae6-82d1-4fa5-9b03-242a4d5a57f7) |',
+                '| 7,43 zł | 10 szt. / 74,28 zł | [Allegro Kapak 660 g](https://allegro.pl/produkt/10x-karton-klapowy-600x400x200-mm-gabaryt-a-bardzo-mocny-60x40x20-cm-2eb61935-e116-4b10-849c-a739f0dd4029) |',
+            }, {
+                debounce = 0,
+                pipe_table = { max_table_width = 1.0 },
+                win_options = { wrap = { default = false, rendered = false } },
+            })
+
+            util.assert_screen({
+                '┌────────────────────┬────────────────────┬────────────────────────┐',
+                '│ Cena / szt. brutto │ Paczka             │ Oferta                 │',
+                '├────────────────────┼────────────────────┼────────────────────────┤',
+                '│ 5,50 zł            │ 20 szt. / 110 zł   │ 󰖟 Allegro Catido 600 g │',
+                '│ 7,43 zł            │ 10 szt. / 74,28 zł │ 󰖟 Allegro Kapak 660 g  │',
+                '└────────────────────┴────────────────────┴────────────────────────┘',
             })
         end)
     end)
