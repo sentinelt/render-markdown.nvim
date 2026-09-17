@@ -43,7 +43,6 @@ describe('demo/heading_code.md', function()
             marks:add(row:get(0, 1), { 0, 0 }, util.code.bg())
         end
         marks:add(row:get(0, 0), { 0, 3 }, util.conceal())
-        marks:add(row:get(0, 0), { 0, 3 }, util.conceal_lines())
 
         util.assert_view(marks, {
             '󰫎 󰲡 Heading 1',
@@ -68,6 +67,7 @@ describe('demo/heading_code.md', function()
             '',
             '  if __name__ == "__main__":',
             '      main()',
+            '',
         })
     end)
 end)

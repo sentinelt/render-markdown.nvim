@@ -498,7 +498,7 @@ require('render-markdown').setup({
         -- | thick | use the same highlight as the code body              |
         -- | thin  | when lines are empty overlay the above & below icons |
         -- | hide  | conceal lines unless language name or icon is added  |
-        border = 'hide',
+        border = 'none',
         -- Used above code blocks to fill remaining space around language.
         language_border = '█',
         -- Added to the left of language.
@@ -1216,7 +1216,7 @@ require('render-markdown').setup({
         -- | thick | use the same highlight as the code body              |
         -- | thin  | when lines are empty overlay the above & below icons |
         -- | hide  | conceal lines unless language name or icon is added  |
-        border = 'hide',
+        border = 'none',
         -- Used above code blocks to fill remaining space around language.
         language_border = '█',
         -- Added to the left of language.

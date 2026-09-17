@@ -43,7 +43,6 @@ describe('demo/callout.md', function()
         marks:add(row:get(0, 1), { 2, 0 }, util.code.bg())
         marks:add(row:get(0, 0), { 0, 1 }, util.quote(ok))
         marks:add(row:get(0, 0), { 2, 5 }, util.conceal())
-        marks:add(row:get(0, 0), { 2, 5 }, util.conceal_lines())
 
         marks:add(row:get(2), 0, util.heading.sign(1))
         marks:add(row:get(0, 0), { 0, 1 }, util.heading.icon(1))
@@ -108,6 +107,7 @@ describe('demo/callout.md', function()
             '  ▋',
             '󰢱 ▋ 󰢱 lua███████████████████████████████████████████████████████████████████████',
             "  ▋ print('Standard tip')",
+            '',
             '',
             '󰫎 󰲡 Important',
             '',

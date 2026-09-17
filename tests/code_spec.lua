@@ -83,25 +83,26 @@ describe('code', function()
 
         local b1 = width[1] - (2 + 4) -- icon + 'rust'
         marks:add(row:get(0), 0, util.code.border('█', true, 'rust', b1))
-        marks:add(row:get(4, 0), { 0, 3 }, util.conceal_lines())
+        row:get(4)
 
         local b2 = width[2] - (2 + 2 + 2) -- col + icon + 'py'
         marks:add(row:get(4), 2, util.code.border('█', true, 'py', b2))
         marks:add(row:get(2), 0, util.padding(2))
-        marks:add(row:get(2, 0), { 2, 5 }, util.conceal_lines())
+        row:get(2)
 
         local b3 = width[3] - (2 + 2 + 3) -- indent + icon + 'lua'
         marks:add(row:get(4), 0, util.code.border('█', true, 2, 'lua', b3))
-        marks:add(row:get(4, 0), { 0, 5 }, util.conceal_lines())
+        row:get(4)
 
-        marks:add(row:get(4, 0), { 0, 3 }, util.conceal_lines())
-        marks:add(row:get(2, 0), { 0, 3 }, util.conceal_lines())
+        row:get(4)
+        row:get(2)
 
         util.assert_view(marks, {
             '󱘗 󱘗 rust████████████████████████████████████████████████████████████████████████',
             '  fn main() {',
             '      println!("Hello, World!");',
             '  }',
+            '',
             '',
             '  ● List Divider',
             '',
@@ -110,6 +111,7 @@ describe('code', function()
             '',
             '    print("world")',
             '',
+            '',
             '  Paragraph Divider',
             '',
             '󰢱 ██󰢱 lua███████████████████████████████████████████████████████████████████████',
@@ -117,9 +119,12 @@ describe('code', function()
             '',
             "    print('world')",
             '',
+            '',
             '  ● List Divider',
             '',
+            '',
             "      print('Hello, World!')",
+            '',
         })
     end)
 
