@@ -187,7 +187,7 @@ require('render-markdown').setup({
     -- Vim modes that will show a rendered view of the markdown file, :h mode(), for all enabled
     -- components. Individual components can be enabled for other modes. Remaining modes will be
     -- unaffected by this plugin.
-    render_modes = { 'n', 'c', 't' },
+    render_modes = { 'n', 'c', 't', 'i' },
     -- Milliseconds that must pass before updating marks, updates occur.
     -- within the context of the visible window, not the entire buffer.
     debounce = 100,
