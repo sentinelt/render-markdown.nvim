@@ -91,13 +91,40 @@ function Render:marker()
     end
     -- https://github.com/tree-sitter-grammars/tree-sitter-markdown/issues/127
     local node = self.data.marker
-    local text = str.pad(str.spaces('start', node.text)) .. icon
-    local overflow = str.width(text) > str.width(node.text)
+    local lead = str.spaces('start', node.text)
+    local trail = str.spaces('end', node.text)
+    local text = str.pad(lead) .. icon
+    -- Overlay only the marker glyph. The trailing space after "-" must
+    -- stay visible: a double-width bullet (or a glyph wider than
+    -- strdisplaywidth reports) would otherwise sit on top of that gap.
+    local core = math.max(str.width(node.text) - lead - trail, 0)
+    local overflow = str.width(text) > core
     self.marks:over(self.config, 'bullet', node, {
         virt_text = { { text, highlight } },
         virt_text_pos = overflow and 'inline' or 'overlay',
         conceal = overflow and '' or nil,
-    })
+    }, { 0, 0, 0, -trail })
+    if trail > 0 then
+        self.marks:add(
+            self.config,
+            'bullet',
+            node.start_row,
+            node.end_col - trail,
+            {
+                end_col = node.end_col,
+                conceal = '',
+            }
+        )
+        self.marks:add(self.config, 'bullet', node.start_row, node.end_col, {
+            virt_text = { { str.pad(trail), highlight } },
+            virt_text_pos = 'inline',
+        })
+    elseif not vim.endswith(text, ' ') then
+        self.marks:add(self.config, 'bullet', node.start_row, node.end_col, {
+            virt_text = { { ' ', highlight } },
+            virt_text_pos = 'inline',
+        })
+    end
 end
 
 ---@private

@@ -134,6 +134,27 @@ function M.bullet(level, spaces)
     }
 end
 
+---@return vim.api.keyset.set_extmark
+function M.bullet_gap()
+    ---@type vim.api.keyset.set_extmark
+    return {
+        virt_text = { { ' ', 'RmBullet' } },
+        virt_text_pos = 'inline',
+    }
+end
+
+---@param marks render.md.test.Marks
+---@param row render.md.test.Range|integer
+---@param col render.md.test.Range
+---@param level integer
+---@param spaces? integer
+function M.add_bullet(marks, row, col, level, spaces)
+    local start, stop = col[1], col[2]
+    marks:add(row, { start, stop - 1 }, M.bullet(level, spaces))
+    marks:add(row, { stop - 1, stop }, M.conceal())
+    marks:add(row, stop, M.bullet_gap())
+end
+
 ---@param level integer
 ---@return vim.api.keyset.set_extmark
 function M.ordered(level)

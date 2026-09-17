@@ -49,7 +49,7 @@ describe('code', function()
         marks:add(row:get(0, 1), { 0, 0 }, util.code.bg())
         marks:add(row:get(0, 0), { 0, 3 }, util.conceal())
 
-        marks:add(row:get(2, 0), { 0, 2 }, util.bullet(1))
+        util.add_bullet(marks, row:get(2, 0), { 0, 2 }, 1)
 
         marks:add(row:get(2), 2, util.code.sign('py'))
         marks:add(row:get(0, 0), { 2, 5 }, util.conceal())
@@ -67,7 +67,7 @@ describe('code', function()
         marks:add(row:get(0, 1), { 0, 0 }, util.code.bg())
         marks:add(row:get(0, 0), { 0, 5 }, util.conceal())
 
-        marks:add(row:get(2, 0), { 0, 2 }, util.bullet(1))
+        util.add_bullet(marks, row:get(2, 0), { 0, 2 }, 1)
 
         marks:add(row:get(2, 0), { 0, 3 }, util.conceal())
         marks:add(row:get(1, 1), { 0, 0 }, util.code.bg())

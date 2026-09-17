@@ -28,9 +28,20 @@ describe('checkbox', function()
             '- Todo [-] Checkbox',
         })
         local marks = util.marks()
-        marks:add({ 0, 0 }, { 0, 2 }, util.bullet(1))
+        util.add_bullet(marks, { 0, 0 }, { 0, 2 }, 1)
         util.assert_view(marks, {
             '● Todo - Checkbox',
+        })
+    end)
+
+    it('keeps space after bullet before text', function()
+        util.setup.text({
+            '- na 44 cm: dwa [400×300×20](https://heykapak.pl/x) jedna na drugiej',
+            '- na 39 cm: [400×300×30](https://heykapak.pl/y)',
+        }, { debounce = 0 })
+        util.assert_screen({
+            '● na 44 cm: dwa 󰖟 400×300×20 jedna na drugiej',
+            '● na 39 cm: 󰖟 400×300×30',
         })
     end)
 end)

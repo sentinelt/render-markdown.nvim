@@ -21,7 +21,7 @@ describe('demo/box_dash_quote.md', function()
         marks:add(row:get(1, 0), { 0, 2 }, util.conceal())
         marks:add(row:get(0), 2, util.checkbox('todo', 0))
         marks:add(row:get(0), 6, util.padding(1, false))
-        marks:add(row:get(1, 0), { 0, 2 }, util.bullet(1))
+        util.add_bullet(marks, row:get(1, 0), { 0, 2 }, 1)
 
         marks:add(row:get(2), 0, {
             virt_text = { { ('─'):rep(vim.o.columns), 'RmDash' } },
