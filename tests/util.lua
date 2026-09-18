@@ -128,18 +128,10 @@ function M.bullet(level, spaces)
     ---@type vim.api.keyset.set_extmark
     return {
         virt_text = {
-            { (' '):rep(spaces or 0) .. icons[level], 'RmBullet' },
+            { (' '):rep(spaces or 0) .. icons[level] .. ' ', 'RmBullet' },
         },
-        virt_text_pos = 'overlay',
-    }
-end
-
----@return vim.api.keyset.set_extmark
-function M.bullet_gap()
-    ---@type vim.api.keyset.set_extmark
-    return {
-        virt_text = { { ' ', 'RmBullet' } },
         virt_text_pos = 'inline',
+        conceal = '',
     }
 end
 
@@ -149,10 +141,7 @@ end
 ---@param level integer
 ---@param spaces? integer
 function M.add_bullet(marks, row, col, level, spaces)
-    local start, stop = col[1], col[2]
-    marks:add(row, { start, stop - 1 }, M.bullet(level, spaces))
-    marks:add(row, { stop - 1, stop }, M.conceal())
-    marks:add(row, stop, M.bullet_gap())
+    marks:add(row, col, M.bullet(level, spaces))
 end
 
 ---@param level integer
