@@ -569,4 +569,53 @@ describe('table', function()
             },
         }, row[2].virt_lines)
     end)
+
+    local br_lines = {
+        '',
+        '| A | B |',
+        '|---|---|',
+        '| [x](http://a.b)<br>basic | a <br/> b `c<br>d` <BR /> e |',
+        '| plain | trailing<br> |',
+        '| **bold<br>text** | <br>first empty |',
+    }
+
+    it('br tags break lines in wrapped table', function()
+        util.setup.text(br_lines, {
+            pipe_table = { max_table_width = 20 },
+            win_options = { wrap = { default = false, rendered = false } },
+        })
+
+        util.assert_screen({
+            '┌───────┬──────────┐',
+            '│ A     │ B        │',
+            '├───────┼──────────┤',
+            '│ 󰖟 x   │ a        │',
+            '│ basic │ b c<br>d │',
+            '│       │ e        │',
+            '│ plain │ trailing │',
+            '│ bold  │          │',
+            '│ text  │ first    │',
+            '│       │ empty    │',
+            '└───────┴──────────┘',
+        })
+    end)
+
+    it('br tags break lines without max_table_width', function()
+        util.setup.text(br_lines, {
+            win_options = { wrap = { default = false, rendered = false } },
+        })
+
+        util.assert_screen({
+            '┌───────┬──────────────┐',
+            '│ A     │ B            │',
+            '├───────┼──────────────┤',
+            '│ 󰖟 x   │ a            │',
+            '│ basic │ b c<br>d     │',
+            '│       │ e            │',
+            '│ plain │ trailing     │',
+            '│ bold  │              │',
+            '│ text  │ first empty  │',
+            '└───────┴──────────────┘',
+        })
+    end)
 end)

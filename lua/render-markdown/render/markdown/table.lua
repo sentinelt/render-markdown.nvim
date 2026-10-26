@@ -62,7 +62,8 @@ local Alignment = {
 ---@field private config render.md.table.Config
 ---@field private data render.md.table.Data
 ---@field private wrap_layout render.md.table.WrapLayout
----@field private cell_lines? table<render.md.Node, render.md.Line>
+---@field private cell_lines? table<render.md.Node, render.md.Line[]>
+---@field private breaks? table<integer, table<integer, integer>>
 ---@field private highlights? table<integer, render.md.table.Highlight[]>
 local Render = setmetatable({}, Base)
 Render.__index = Render
@@ -157,20 +158,24 @@ end
 function Render:compute_wrap_layout()
     local no_wrap = { enabled = false, col_widths = {}, row_heights = {} }
 
-    -- Feature disabled when max_table_width is 0 (unset)
-    if self.config.max_table_width == 0 then
-        return no_wrap
-    end
     -- Only supported for padded/trimmed cell modes
     if not vim.tbl_contains({ 'padded', 'trimmed' }, self.config.cell) then
+        return no_wrap
+    end
+    -- Wrapping disabled when max_table_width is 0 (unset), but <br> tags
+    -- still need multiple lines per row
+    local mtw = self.config.max_table_width
+    if mtw == 0 and vim.tbl_isempty(self:get_breaks()) then
         return no_wrap
     end
 
     local win_width = env.win.width(self.context.win)
     local remaining_width = math.max(win_width - self:indent_width(), 1)
-    local mtw = self.config.max_table_width
     local available
-    if mtw < 0 then
+    if mtw == 0 then
+        -- No width limit: lines break only at <br> tags
+        available = math.huge
+    elseif mtw < 0 then
         -- Negative: characters from right edge
         available = remaining_width + mtw
     elseif mtw <= 1 then
@@ -191,6 +196,15 @@ function Render:compute_wrap_layout()
     ---@param cell render.md.table.row.Cell
     ---@return integer
     local function content_width(cell)
+        local parts = self:cell_parts(cell.node)
+        if #parts > 1 then
+            -- cell with <br> tags is as wide as its widest part
+            local width = 0
+            for _, part in ipairs(parts) do
+                width = math.max(width, part:width())
+            end
+            return width
+        end
         return math.max(cell.width - cell.space.left - cell.space.right, 0)
     end
 
@@ -249,8 +263,7 @@ function Render:compute_wrap_layout()
     for r, row in ipairs(self.data.rows) do
         local max_lines = 1
         for i, cell in ipairs(row.cells) do
-            local w = col_widths[i]
-            local lines = #self:wrap_line(self:cell_line(cell.node), w)
+            local lines = #self:wrap_cell(cell.node, col_widths[i])
             if lines > max_lines then
                 max_lines = lines
             end
@@ -328,20 +341,83 @@ function Render.alignment(node)
     end
 end
 
+---Display lines of a cell, one for each part between <br> tags.
 ---@private
 ---@param node render.md.Node
----@return render.md.Line
-function Render:cell_line(node)
+---@return render.md.Line[]
+function Render:cell_parts(node)
     -- compute_wrap_layout and row_wrapped_lines both need every cell, cache
     -- the result, callers do not modify it
     self.cell_lines = self.cell_lines or {}
-    local line = self.cell_lines[node]
-    if not line then
-        line = Line.new(self.config.filler)
-        vim.list_extend(line:get(), self:cell_segments(node))
-        self.cell_lines[node] = line
+    local parts = self.cell_lines[node]
+    if not parts then
+        parts = {}
+        for _, segments in ipairs(self:cell_segments(node)) do
+            local line = Line.new(self.config.filler)
+            vim.list_extend(line:get(), segments)
+            parts[#parts + 1] = line
+        end
+        self.cell_lines[node] = parts
     end
-    return line
+    return parts
+end
+
+---@private
+---@param node render.md.Node
+---@param width integer
+---@return render.md.Line[]
+function Render:wrap_cell(node, width)
+    local result = {} ---@type render.md.Line[]
+    for _, part in ipairs(self:cell_parts(node)) do
+        vim.list_extend(result, self:wrap_line(part, width))
+    end
+    return result
+end
+
+---Call callback for each markdown_inline tree that overlaps the table rows.
+---@private
+---@param callback fun(root: TSNode, start_row: integer, end_row: integer)
+function Render:inline_trees(callback)
+    local first, last = self.node.start_row, self.node.end_row
+    local parser = vim.treesitter.get_parser(self.context.buf)
+    if not parser then
+        return
+    end
+    parser:for_each_tree(function(tree, language_tree)
+        if language_tree:lang() ~= 'markdown_inline' then
+            return
+        end
+        local root = tree:root()
+        local root_start, _, root_end, _ = root:range()
+        if root_start > last or root_end < first then
+            return
+        end
+        callback(root, math.max(root_start, first), math.min(root_end, last))
+    end)
+end
+
+---Collect <br> tags in the table rows, GitHub renders them as line breaks.
+---@private
+---@return table<integer, table<integer, integer>> row -> start col -> end col
+function Render:get_breaks()
+    if self.breaks then
+        return self.breaks
+    end
+    local result = {} ---@type table<integer, table<integer, integer>>
+    self.breaks = result
+    local buf = self.context.buf
+    self:inline_trees(function(root, start_row, end_row)
+        local query = vim.treesitter.query.parse(
+            'markdown_inline',
+            '((html_tag) @break (#lua-match? @break "^<[bB][rR]%s*/?>$"))'
+        )
+        for _, node in query:iter_captures(root, buf, start_row, end_row + 1) do
+            local row, start_col, _, end_col = node:range()
+            result[row] = result[row] or {}
+            result[row][start_col] = end_col
+        end
+    end)
+    return result
 end
 
 ---Collect markdown_inline highlight captures for all rows of the table with
@@ -364,19 +440,8 @@ function Render:get_highlights()
         return result
     end
     local first, last = self.node.start_row, self.node.end_row
-    local parser = vim.treesitter.get_parser(buf)
-    parser:for_each_tree(function(tree, language_tree)
-        if language_tree:lang() ~= 'markdown_inline' then
-            return
-        end
-        local root = tree:root()
-        local root_start, _, root_end, _ = root:range()
-        if root_start > last or root_end < first then
-            return
-        end
-        local start_row = math.max(root_start, first)
-        local end_row = math.min(root_end, last) + 1
-        for id, node in query:iter_captures(root, buf, start_row, end_row) do
+    self:inline_trees(function(root, start_row, end_row)
+        for id, node in query:iter_captures(root, buf, start_row, end_row + 1) do
             local capture = query.captures[id]
             if not vim.startswith(capture, 'conceal') then
                 local sr, sc, er, ec = node:range()
@@ -411,10 +476,11 @@ function Render:highlight_at(row, col)
 end
 
 ---Compute display segments for a cell: raw text − concealed + injected,
----with treesitter highlight groups preserved.
+---with treesitter highlight groups preserved. One list for each part
+---between <br> tags.
 ---@private
 ---@param node render.md.Node
----@return render.md.mark.Line
+---@return render.md.mark.Line[]
 function Render:cell_segments(node)
     local row = node.start_row
     local start_col = node.start_col
@@ -425,12 +491,14 @@ function Render:cell_segments(node)
     local raw = node.text:sub(lead + 1, #node.text - trail)
     local base_col = start_col + lead
     local injections = self.context.inline:range(row, start_col, end_col)
+    local breaks = self:get_breaks()[row] or {}
 
-    local segments = {} ---@type render.md.mark.Line
+    local parts = { {} } ---@type render.md.mark.Line[]
     local function push(text, hl)
         if #text == 0 then
             return
         end
+        local segments = parts[#parts]
         if #segments > 0 and segments[#segments][2] == hl then
             segments[#segments][1] = segments[#segments][1] .. text
         else
@@ -450,6 +518,7 @@ function Render:cell_segments(node)
         push_injection(injections[inj_i])
         inj_i = inj_i + 1
     end
+    local break_end = nil ---@type integer?
     local bytes = vim.str_utf_pos(raw)
     for k, start_byte in ipairs(bytes) do
         local end_byte = k < #bytes and bytes[k + 1] - 1 or #raw
@@ -459,6 +528,13 @@ function Render:cell_segments(node)
             push_injection(injections[inj_i])
             inj_i = inj_i + 1
         end
+        -- Start a new part at a <br> tag and skip the tag text
+        local skip = break_end ~= nil and abs_col < break_end
+        if not skip and breaks[abs_col] then
+            break_end = breaks[abs_col]
+            parts[#parts + 1] = {}
+            skip = true
+        end
         local char = raw:sub(start_byte, end_byte)
         local body = {
             start_row = row,
@@ -466,7 +542,7 @@ function Render:cell_segments(node)
             end_col = abs_col + end_byte - start_byte + 1,
             text = char,
         }
-        if self.context.conceal:get(body) <= 0 then
+        if not skip and self.context.conceal:get(body) <= 0 then
             push(char, self:highlight_at(row, abs_col))
         end
     end
@@ -475,7 +551,32 @@ function Render:cell_segments(node)
         push_injection(injections[inj_i])
         inj_i = inj_i + 1
     end
-    return segments
+    -- Spaces next to a <br> tag do not show, same as in html
+    for i = 1, #parts - 1 do
+        Render.trim(parts[i], false)
+        Render.trim(parts[i + 1], true)
+    end
+    -- A <br> tag at the end of a cell does not add an empty line
+    if #parts > 1 and #parts[#parts] == 0 then
+        parts[#parts] = nil
+    end
+    return parts
+end
+
+---@private
+---@param segments render.md.mark.Line
+---@param start boolean remove spaces at the start, else at the end
+function Render.trim(segments, start)
+    while #segments > 0 do
+        local i = start and 1 or #segments
+        local pattern = start and '^%s+' or '%s+$'
+        local text = segments[i][1]:gsub(pattern, '')
+        if #text > 0 then
+            segments[i][1] = text
+            return
+        end
+        table.remove(segments, i)
+    end
 end
 
 --TODO: Critical piece of code
@@ -787,10 +888,8 @@ function Render:row_wrapped_lines(row, row_index)
     -- Pre-compute wrapped display lines for each cell in this row
     local cell_lines = {} ---@type render.md.Line[][]
     for i, cell in ipairs(row.cells) do
-        cell_lines[i] = self:wrap_line(
-            self:cell_line(cell.node),
-            self.wrap_layout.col_widths[i]
-        )
+        cell_lines[i] =
+            self:wrap_cell(cell.node, self.wrap_layout.col_widths[i])
     end
 
     local filler = self.config.filler
