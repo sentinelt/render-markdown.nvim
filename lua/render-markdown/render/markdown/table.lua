@@ -53,10 +53,17 @@ local Alignment = {
 ---@field col_widths integer[]
 ---@field row_heights integer[]
 
+---@class render.md.table.Highlight
+---@field start_col integer
+---@field end_col integer
+---@field group string
+
 ---@class render.md.render.Table: render.md.Render
 ---@field private config render.md.table.Config
 ---@field private data render.md.table.Data
 ---@field private wrap_layout render.md.table.WrapLayout
+---@field private cell_lines? table<render.md.Node, render.md.Line>
+---@field private highlights? table<integer, render.md.table.Highlight[]>
 local Render = setmetatable({}, Base)
 Render.__index = Render
 
@@ -325,9 +332,82 @@ end
 ---@param node render.md.Node
 ---@return render.md.Line
 function Render:cell_line(node)
-    local line = Line.new(self.config.filler)
-    vim.list_extend(line:get(), self:cell_segments(node))
+    -- compute_wrap_layout and row_wrapped_lines both need every cell, cache
+    -- the result, callers do not modify it
+    self.cell_lines = self.cell_lines or {}
+    local line = self.cell_lines[node]
+    if not line then
+        line = Line.new(self.config.filler)
+        vim.list_extend(line:get(), self:cell_segments(node))
+        self.cell_lines[node] = line
+    end
     return line
+end
+
+---Collect markdown_inline highlight captures for all rows of the table with
+---one query pass per tree. Same result as get_captures_at_pos for each
+---character, which is slow since it runs the query on every tree each call.
+---@private
+---@return table<integer, render.md.table.Highlight[]>
+function Render:get_highlights()
+    if self.highlights then
+        return self.highlights
+    end
+    local result = {} ---@type table<integer, render.md.table.Highlight[]>
+    self.highlights = result
+    local buf = self.context.buf
+    if not vim.treesitter.highlighter.active[buf] then
+        return result
+    end
+    local query = vim.treesitter.query.get('markdown_inline', 'highlights')
+    if not query then
+        return result
+    end
+    local first, last = self.node.start_row, self.node.end_row
+    local parser = vim.treesitter.get_parser(buf)
+    parser:for_each_tree(function(tree, language_tree)
+        if language_tree:lang() ~= 'markdown_inline' then
+            return
+        end
+        local root = tree:root()
+        local root_start, _, root_end, _ = root:range()
+        if root_start > last or root_end < first then
+            return
+        end
+        local start_row = math.max(root_start, first)
+        local end_row = math.min(root_end, last) + 1
+        for id, node in query:iter_captures(root, buf, start_row, end_row) do
+            local capture = query.captures[id]
+            if not vim.startswith(capture, 'conceal') then
+                local sr, sc, er, ec = node:range()
+                for row = math.max(sr, first), math.min(er, last) do
+                    result[row] = result[row] or {}
+                    result[row][#result[row] + 1] = {
+                        start_col = row == sr and sc or 0,
+                        end_col = row == er and ec or math.huge,
+                        group = '@' .. capture,
+                    }
+                end
+            end
+        end
+    end)
+    return result
+end
+
+---@private
+---@param row integer
+---@param col integer
+---@return string
+function Render:highlight_at(row, col)
+    local highlights = self:get_highlights()[row] or {}
+    -- last capture wins, same as get_captures_at_pos order
+    for i = #highlights, 1, -1 do
+        local highlight = highlights[i]
+        if highlight.start_col <= col and col < highlight.end_col then
+            return highlight.group
+        end
+    end
+    return ''
 end
 
 ---Compute display segments for a cell: raw text − concealed + injected,
@@ -387,25 +467,7 @@ function Render:cell_segments(node)
             text = char,
         }
         if self.context.conceal:get(body) <= 0 then
-            -- Use built-in API to get the treesitter highlight at this position
-            local hl = ''
-            for _, cap in
-                ipairs(
-                    vim.treesitter.get_captures_at_pos(
-                        self.context.buf,
-                        row,
-                        abs_col
-                    )
-                )
-            do
-                if
-                    cap.lang == 'markdown_inline'
-                    and not vim.startswith(cap.capture, 'conceal')
-                then
-                    hl = '@' .. cap.capture
-                end
-            end
-            push(char, hl)
+            push(char, self:highlight_at(row, abs_col))
         end
     end
     -- Trailing injections after the last character

@@ -511,4 +511,62 @@ describe('table', function()
             '└─────────┴────────────────────────┴────────────┴──────────┘',
         })
     end)
+
+    it('wrapped cells keep inline highlights', function()
+        util.setup.text({
+            '',
+            '| A | B |',
+            '|---|---|',
+            '| one **bold words** and *italic* text | see [the label](https://example.com) and more |',
+        }, {
+            pipe_table = { max_table_width = 40 },
+            win_options = { wrap = { default = false, rendered = false } },
+        })
+
+        local row = {} ---@type render.md.test.MarkInfo[]
+        for _, mark in ipairs(util.actual_marks()) do
+            local inline = mark.virt_text_pos == 'inline'
+            if mark.row[1] == 3 and not inline then
+                if mark.virt_text or mark.virt_lines then
+                    row[#row + 1] = mark
+                end
+            end
+        end
+        assert.same(2, #row)
+        assert.same({
+            { '│', 'RmTableRow' },
+            { ' ', 'Normal' },
+            { 'one ', '' },
+            { 'bold words', '@markup.strong' },
+            { '   ', 'Normal' },
+            { '│', 'RmTableRow' },
+            { ' ', 'Normal' },
+            { 'see ', '' },
+            { '󰖟 ', 'RmLink' },
+            { 'the label', '@markup.link.label' },
+            { '  ', 'Normal' },
+            { '│', 'RmTableRow' },
+        }, row[1].virt_text)
+        assert.same({
+            {
+                { '│', 'RmTableRow' },
+                { ' ', 'Normal' },
+                { 'and ', '' },
+                { 'italic', '@markup.italic' },
+                { ' text', '' },
+                { '  ', 'Normal' },
+                { '│', 'RmTableRow' },
+                { ' ', 'Normal' },
+                { 'and more', '' },
+                { '         ', 'Normal' },
+                { '│', 'RmTableRow' },
+            },
+            {
+                {
+                    '└──────────────────┴──────────────────┘',
+                    'RmTableRow',
+                },
+            },
+        }, row[2].virt_lines)
+    end)
 end)
